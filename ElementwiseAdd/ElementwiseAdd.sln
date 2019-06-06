@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.28307.489
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ElementwiseAdd", "ElementwiseAdd.vcxproj", "{03C2FC5A-9BB1-4BA2-AB57-AB538C964E18}"
+Project("{8EFF6B61-D088-4BDF-B157-C75963686822}") = "ElementwiseAdd", "ElementwiseAdd.vcxproj", "{03C2FC5A-9BB1-4BA2-AB57-AB538C964E18}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
