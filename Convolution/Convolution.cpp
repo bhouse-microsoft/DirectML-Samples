@@ -4,6 +4,7 @@
 #include "pch.h"
 
 #include "ConvolutionLib.h"
+#include "FloatMath.h"
 
 using winrt::com_ptr;
 using winrt::check_hresult;
@@ -64,6 +65,16 @@ void InitializeDirect3D12(
         dxgiAdapter = nullptr;
         check_hresult(dxgiFactory->EnumAdapters(adapterIndex, dxgiAdapter.put()));
         ++adapterIndex;
+
+        DXGI_ADAPTER_DESC desc;
+        dxgiAdapter.get()->GetDesc(&desc);
+
+#if 0
+        if (wcsstr(desc.Description, L"Microsoft") == NULL) {
+            hr = DXGI_ERROR_UNSUPPORTED;
+            continue;
+        }
+#endif
 
         hr = ::D3D12CreateDevice(
             dxgiAdapter.get(),
@@ -227,13 +238,14 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
     convolution_shape shape;
 
     shape.m_batchCount = 1;
-    shape.m_channelCount = 2;
-    shape.m_featureCount = 2;
+    shape.m_channelCount = 1024;
+    shape.m_featureCount = 1;
 
     for (int i = 0; i < dimensions; i++) {
-        shape.m_inputSize[i] = 2;
+        shape.m_inputSize[i] = 5;
         shape.m_kernelSize[i] = 1;
-        shape.m_padding[i] = 0;
+        shape.m_startPadding[i] = 0;
+        shape.m_endPadding[i] = 0;
         shape.m_kernelStride[i] = 1;
     }
 
@@ -243,32 +255,22 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
     UINT channels = shape.m_channelCount;
     UINT inputWidth = shape.m_inputSize[1];
     UINT inputHeight = shape.m_inputSize[0];
-    UINT kernelWidth = 1;
-    UINT kernelHeight = 1;
+    UINT kernelWidth = shape.m_kernelSize[1];
+    UINT kernelHeight = shape.m_kernelSize[0];
     UINT features = shape.m_featureCount;
     UINT kernelStride[dimensions] = { 1, 1 };
-    UINT padding[dimensions] = { 0, 0 };
+    UINT startPadding[dimensions] = { shape.m_startPadding[0], shape.m_startPadding[1] };
+    UINT endPadding[dimensions] = { shape.m_endPadding[0], shape.m_endPadding[1] };
+    UINT outputPadding[dimensions] = { 0, 0 };
     UINT dilations[dimensions] = { 0, 0 };
-
-    UINT inputTensorSizes[4] = { batchCount, channels, inputWidth, inputHeight };
-    UINT inputTensorElementCount = inputTensorSizes[0] * inputTensorSizes[1] * inputTensorSizes[2] * inputTensorSizes[3];
 
     UINT filterTensorSizes[4] = { features, channels, kernelWidth, kernelHeight };
     UINT filterTensorElementCount = filterTensorSizes[0] * filterTensorSizes[1] * filterTensorSizes[2] * filterTensorSizes[3];
 
-    UINT outputTensorSizes[4] = { batchCount, features,
-                                          ((inputWidth + padding[0]) - ((kernelWidth - 1) / 2)) / kernelStride[0],
-                                          ((inputHeight + padding[1]) - ((kernelHeight - 1) / 2)) / kernelStride[1] };
+    UINT outputTensorSizes[4] = { batchCount, features, cp.m_constants.m_outputSize[2], cp.m_constants.m_outputSize[3]};
     UINT outputTensorElementCount = outputTensorSizes[0] * outputTensorSizes[1] * outputTensorSizes[2] * outputTensorSizes[3];
 
     UINT kernelSizes[dimensions] = { kernelWidth, kernelHeight };
-
-    for (int i = 0; i < 4; i++) {
-        assert(inputTensorSizes[i] == cp.m_constants.m_inputSize[i]);
-        assert(filterTensorSizes[i] == cp.m_constants.m_filterSize[i]);
-        assert(outputTensorSizes[i] == cp.m_constants.m_outputSize[i]);
-    }
-
 
     DML_BUFFER_TENSOR_DESC dmlInputBufferTensorDesc = {};
     dmlInputBufferTensorDesc.DataType = DML_TENSOR_DATA_TYPE_FLOAT32;
@@ -276,12 +278,7 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
     dmlInputBufferTensorDesc.DimensionCount = ARRAYSIZE(cp.m_constants.m_inputSize);
     dmlInputBufferTensorDesc.Sizes = cp.m_constants.m_inputSize;
     dmlInputBufferTensorDesc.Strides = nullptr;
-    dmlInputBufferTensorDesc.TotalTensorSizeInBytes = DMLCalcBufferTensorSize(
-        dmlInputBufferTensorDesc.DataType,
-        dmlInputBufferTensorDesc.DimensionCount,
-        dmlInputBufferTensorDesc.Sizes,
-        dmlInputBufferTensorDesc.Strides);
-    assert((cp.m_constants.m_inputElementCount * sizeof(float)) == dmlInputBufferTensorDesc.TotalTensorSizeInBytes);
+    dmlInputBufferTensorDesc.TotalTensorSizeInBytes = (cp.m_constants.m_inputElementCount * sizeof(float));
 
     DML_TENSOR_DESC dmlInputTensorDesc{};
     dmlInputTensorDesc.Type = DML_TENSOR_TYPE_BUFFER;
@@ -293,12 +290,7 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
     dmlFilterBufferTensorDesc.DimensionCount = ARRAYSIZE(cp.m_constants.m_filterSize);
     dmlFilterBufferTensorDesc.Sizes = cp.m_constants.m_filterSize;
     dmlFilterBufferTensorDesc.Strides = nullptr;
-    dmlFilterBufferTensorDesc.TotalTensorSizeInBytes = DMLCalcBufferTensorSize(
-        dmlFilterBufferTensorDesc.DataType,
-        dmlFilterBufferTensorDesc.DimensionCount,
-        dmlFilterBufferTensorDesc.Sizes,
-        dmlFilterBufferTensorDesc.Strides);
-    assert((cp.m_constants.m_filterElementCount * sizeof(float)) == dmlFilterBufferTensorDesc.TotalTensorSizeInBytes);
+    dmlFilterBufferTensorDesc.TotalTensorSizeInBytes = (cp.m_constants.m_filterElementCount * sizeof(float));
 
     DML_TENSOR_DESC dmlFilterTensorDesc{};
     dmlFilterTensorDesc.Type = DML_TENSOR_TYPE_BUFFER;
@@ -310,12 +302,7 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
     dmlOutputBufferTensorDesc.DimensionCount = ARRAYSIZE(cp.m_constants.m_outputSize);
     dmlOutputBufferTensorDesc.Sizes = cp.m_constants.m_outputSize;
     dmlOutputBufferTensorDesc.Strides = nullptr;
-    dmlOutputBufferTensorDesc.TotalTensorSizeInBytes = DMLCalcBufferTensorSize(
-        dmlOutputBufferTensorDesc.DataType,
-        dmlOutputBufferTensorDesc.DimensionCount,
-        dmlOutputBufferTensorDesc.Sizes,
-        dmlOutputBufferTensorDesc.Strides);
-    assert((cp.m_constants.m_outputElementCount * sizeof(float)) == dmlOutputBufferTensorDesc.TotalTensorSizeInBytes);
+    dmlOutputBufferTensorDesc.TotalTensorSizeInBytes = (cp.m_constants.m_outputElementCount * sizeof(float));
 
     DML_TENSOR_DESC dmlOutputTensorDesc{};
     dmlOutputTensorDesc.Type = DML_TENSOR_TYPE_BUFFER;
@@ -334,9 +321,9 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
         dmlConvolutionOperatorDesc.DimensionCount = 2;
         dmlConvolutionOperatorDesc.Strides = kernelStride;
         dmlConvolutionOperatorDesc.Dilations = dilations;
-        dmlConvolutionOperatorDesc.StartPadding = padding;
-        dmlConvolutionOperatorDesc.EndPadding = padding;
-        dmlConvolutionOperatorDesc.OutputPadding = padding;
+        dmlConvolutionOperatorDesc.StartPadding = startPadding;
+        dmlConvolutionOperatorDesc.EndPadding = endPadding;
+        dmlConvolutionOperatorDesc.OutputPadding = outputPadding;
         dmlConvolutionOperatorDesc.GroupCount = batchCount;
         dmlConvolutionOperatorDesc.FusedActivation = NULL;
 
@@ -551,21 +538,31 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
 
     std::wcout << std::fixed; std::wcout.precision(2);
 
-    FLOAT * inputTensorElementArray = new FLOAT[inputTensorElementCount];
+    const static int floatPrecision = 23;
+    const static int length = shape.m_channelCount;
+    double averageProduct = 1.5;
+    double estimatedSum = averageProduct * length;
+    const static int bitsUsedForAccumulation = (int) (log2(estimatedSum) + 0.99);
+    double estimatedExponent = log2(estimatedSum);
+    double ulp = pow(2.0f, estimatedExponent - floatPrecision + 1);
+    double estimatedMaxError = ulp * sqrt(length) / 2;
 
-    float testValue = 1.674f;
+    assert(shape.m_batchCount == 1 );
 
-    for (int i = 0; i < inputTensorElementCount; i++) {
-        inputTensorElementArray[i] = testValue;
-        cp.m_buffers.m_input[i] = testValue;
+    int inputOffset = 0;
+    int filterOffset = 0;
+    for (int c = 0; c < shape.m_channelCount; c++) {
+        double product = 1.0 + randd();
+        double a_value = 1.0 + randd();
+        double b_value = product / a_value;
+
+        for (int i = 0; i < shape.m_inputSize[0] * shape.m_inputSize[1]; i++)
+            cp.m_buffers.m_input[inputOffset++] = (float)a_value;
+        for (int k = 0; k < shape.m_kernelSize[0] * shape.m_kernelSize[1]; k++)
+            cp.m_buffers.m_filter[filterOffset++] = (float)b_value;
     }
-
-    FLOAT * filterTensorElementArray = new FLOAT[filterTensorElementCount];
-
-    for (int i = 0; i < filterTensorElementCount; i++) {
-        filterTensorElementArray[i] = testValue;
-        cp.m_buffers.m_filter[i] = testValue;
-    }
+    assert(inputOffset == cp.m_buffers.m_input.size());
+    assert(filterOffset == cp.m_buffers.m_filter.size());
 
     {
 #if 0
@@ -585,7 +582,7 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
 #endif
 
         D3D12_SUBRESOURCE_DATA tensorSubresourceData{};
-        tensorSubresourceData.pData = (const void *) inputTensorElementArray;
+        tensorSubresourceData.pData = (const void *) cp.m_buffers.m_input.data();
         tensorSubresourceData.RowPitch = inputTensorBufferSize;
         tensorSubresourceData.SlicePitch = tensorSubresourceData.RowPitch;
 
@@ -608,6 +605,11 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
                 )
             );
 
+        // Upload the filter tensor to the GPU
+        tensorSubresourceData.pData = (const void *)cp.m_buffers.m_filter.data();
+        tensorSubresourceData.RowPitch = filterTensorBufferSize;
+        tensorSubresourceData.SlicePitch = tensorSubresourceData.RowPitch;
+
         ::UpdateSubresources(
             commandList.get(),
             filterBuffer.get(),
@@ -629,7 +631,6 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
 
     DML_BUFFER_BINDING inputBufferBinding{ inputBuffer.get(), 0, inputTensorBufferSize };
     DML_BUFFER_BINDING filterBufferBinding{ filterBuffer.get(), 0, filterTensorBufferSize };
-    //DML_BINDING_DESC inputBindingDesc{ DML_BINDING_TYPE_BUFFER, &inputBufferBinding };
     DML_BINDING_DESC descs[3];
     descs[0] = { DML_BINDING_TYPE_BUFFER, &inputBufferBinding };
     descs[1] = { DML_BINDING_TYPE_BUFFER, &filterBufferBinding };
@@ -719,18 +720,21 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
         std::wcout << L"output tensor: ";
 
     bool valuesMatch = true;
-    for (size_t tensorElementIndex{ 0 }; tensorElementIndex < outputTensorElementCount; ++tensorElementIndex, ++outputBufferData)
+    float maxError = 0.0f;
+    float maxPercentageError = 0.0f;
+    for (int i = 0; i < cp.m_buffers.m_output.size(); i++)
     {
-        if (show_output) {
-            std::wcout << *outputBufferData << L" (" << cp.m_buffers.m_output[tensorElementIndex] << L") ";
-        }
+        float calculated = outputBufferData[i];
+        float expected = cp.m_buffers.m_output[i];
 
-        float value = *outputBufferData;
+        if (show_output)
+            printf("[%d] %4.10f %4.10f\n", i, calculated, expected);
 
-        if (abs(value - cp.m_buffers.m_output[tensorElementIndex]) > 0.001) {
-            valuesMatch = false;
-            if (!show_output) break;
-        }
+        float error = abs(calculated - expected);
+        float percentageError = (error / abs(expected)) * 100.0f;
+
+        maxError = (error > maxError ? error : maxError);
+        maxPercentageError = (percentageError > maxPercentageError ? percentageError : maxPercentageError);
     }
 
     if (show_output)
@@ -739,7 +743,8 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
     D3D12_RANGE emptyRange{ 0, 0 };
     readbackBuffer->Unmap(0, &emptyRange);
 
-    printf("%s\n", (valuesMatch ? "PASS" : "FAIL"));
+    printf("max error = %4.10f\n", maxError);
+    printf("max percentage error = %2.6f\n", maxPercentageError);
 
 #if 0
     double dataSize = (double) outputTensorElementCount * (double) sizeof(FLOAT);

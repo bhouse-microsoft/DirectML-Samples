@@ -76,3 +76,5 @@ private:
         }
     }
 };
+
+double randd();

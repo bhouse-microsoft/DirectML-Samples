@@ -16,7 +16,8 @@ public:
     uint32_t m_inputSize[2];
     uint32_t m_featureCount;
     uint32_t m_kernelSize[2];
-    uint32_t m_padding[2];
+    uint32_t m_startPadding[2];
+    uint32_t m_endPadding[2];
     uint32_t m_kernelStride[2];
 };
 
@@ -36,44 +37,64 @@ public:
 
     uint32_t m_kernelStride[2];
     uint32_t m_startPadding[2];
+    uint32_t m_endPadding[2];
 
     convolution_constants(const convolution_shape & shape)
     {
+        assert(shape.m_batchCount > 0);
+        assert(shape.m_channelCount > 0);
+        assert(shape.m_featureCount > 0);
+
         m_inputSize[0] = shape.m_batchCount;
         m_inputSize[1] = shape.m_channelCount;
-        for(int i = 0; i < 2; i++)
-            m_inputSize[i+2] = shape.m_inputSize[i];
+        for (int i = 0; i < 2; i++) {
+            assert(shape.m_inputSize[i] > 0);
+            m_inputSize[i + 2] = shape.m_inputSize[i];
+        }
 
         m_inputStride[3] = 1;
-        for(int i = 2; i >= 0; i--)
-            m_inputStride[i] = m_inputSize[i+1] * m_inputStride[i+1];
+        for (int i = 2; i >= 0; i--)
+            m_inputStride[i] = m_inputSize[i + 1] * m_inputStride[i + 1];
 
         m_inputElementCount = m_inputSize[0] * m_inputStride[0];
+        assert(m_inputElementCount > 0);
 
         m_filterSize[0] = shape.m_featureCount;
         m_filterSize[1] = shape.m_channelCount;
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < 2; i++) {
+            assert(shape.m_kernelSize[i] > 0);
             m_filterSize[i + 2] = shape.m_kernelSize[i];
+        }
 
         m_filterStride[3] = 1;
         for (int i = 2; i >= 0; i--)
             m_filterStride[i] = m_filterSize[i + 1] * m_filterStride[i + 1];
 
         m_filterElementCount = m_filterSize[0] * m_filterStride[0];
+        assert(m_filterElementCount > 0);
 
         m_outputSize[0] = shape.m_batchCount;
         m_outputSize[1] = shape.m_featureCount;
-        for(int i = 0; i < 2; i++)
-            m_outputSize[2+i] = ((shape.m_inputSize[i] + shape.m_padding[i]) - ((shape.m_kernelSize[i] - 1) / 2)) / shape.m_kernelStride[i];
+        for (int i = 0; i < 2; i++) {
+            uint32_t inputSize = shape.m_inputSize[i] + shape.m_startPadding[i] + shape.m_endPadding[i];
+            assert(inputSize >= shape.m_kernelSize[i]);
+            uint32_t inputRemaining = inputSize - shape.m_kernelSize[i];
+            assert((inputRemaining % shape.m_kernelStride[i]) == 0);
+            uint32_t kernelsRemaining = inputRemaining / shape.m_kernelStride[i];
+            m_outputSize[2 + i] = 1 + kernelsRemaining;
+        }
 
         m_outputStride[3] = 1;
         for (int i = 2; i >= 0; i--)
             m_outputStride[i] = m_outputSize[i + 1] * m_outputStride[i + 1];
 
         m_outputElementCount = m_outputSize[0] * m_outputStride[0];
-        
+        assert(m_outputElementCount > 0);
+
         for (int i = 0; i < 2; i++) {
-            m_startPadding[i] = shape.m_padding[i];
+            m_startPadding[i] = shape.m_startPadding[i];
+            m_endPadding[i] = shape.m_endPadding[i];
+            assert(shape.m_kernelStride[i] > 0);
             m_kernelStride[i] = shape.m_kernelStride[i];
         }
 
