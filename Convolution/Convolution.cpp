@@ -559,6 +559,8 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
 
     assert(shape.m_batchCount == 1 );
 
+    srand(0);   // use same seed to generate same data over different runs
+
     // We want the product to be targetProduct +/- (ulp/2)
     // NOTE: the delta will turn into (2*delta) in product thus ... floatSumUlp / 4
     double delta = floatSumUlp / 4;
