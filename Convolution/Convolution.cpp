@@ -226,55 +226,62 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
 
     convolution_shape shape;
 
-    shape.batchCount = 1;
-    shape.channelCount = 1;
-    shape.featureCount = 1;
+    shape.m_batchCount = 1;
+    shape.m_channelCount = 2;
+    shape.m_featureCount = 2;
 
     for (int i = 0; i < dimensions; i++) {
-        shape.inputSize[i] = 1;
-        shape.kernelSize[i] = 1;
-        shape.padding[i] = 0;
-        shape.kernelStride[i] = 1;
+        shape.m_inputSize[i] = 2;
+        shape.m_kernelSize[i] = 1;
+        shape.m_padding[i] = 0;
+        shape.m_kernelStride[i] = 1;
     }
 
-    constexpr UINT batchCount = 1;
-    constexpr UINT channels = 1;
-    constexpr UINT inputWidth = 1;
-    constexpr UINT inputHeight = 1;
-    constexpr UINT kernelWidth = 1;
-    constexpr UINT kernelHeight = 1;
-    constexpr UINT features = 1;
-    constexpr UINT kernelStride[dimensions] = { 1, 1 };
-    constexpr UINT padding[dimensions] = { 0, 0 };
-    constexpr UINT dilations[dimensions] = { 0, 0 };
+    convolution_parameters<float> cp(shape);
 
-    constexpr UINT inputTensorSizes[4] = { batchCount, channels, inputWidth, inputHeight };
-    constexpr UINT inputTensorElementCount = inputTensorSizes[0] * inputTensorSizes[1] * inputTensorSizes[2] * inputTensorSizes[3];
+    UINT batchCount = 1;
+    UINT channels = shape.m_channelCount;
+    UINT inputWidth = shape.m_inputSize[1];
+    UINT inputHeight = shape.m_inputSize[0];
+    UINT kernelWidth = 1;
+    UINT kernelHeight = 1;
+    UINT features = shape.m_featureCount;
+    UINT kernelStride[dimensions] = { 1, 1 };
+    UINT padding[dimensions] = { 0, 0 };
+    UINT dilations[dimensions] = { 0, 0 };
 
-    constexpr UINT filterTensorSizes[4] = { features, channels, kernelWidth, kernelHeight };
-    constexpr UINT filterTensorElementCount = filterTensorSizes[0] * filterTensorSizes[1] * filterTensorSizes[2] * filterTensorSizes[3];
+    UINT inputTensorSizes[4] = { batchCount, channels, inputWidth, inputHeight };
+    UINT inputTensorElementCount = inputTensorSizes[0] * inputTensorSizes[1] * inputTensorSizes[2] * inputTensorSizes[3];
 
-    constexpr UINT outputTensorSizes[4] = { batchCount, features,
+    UINT filterTensorSizes[4] = { features, channels, kernelWidth, kernelHeight };
+    UINT filterTensorElementCount = filterTensorSizes[0] * filterTensorSizes[1] * filterTensorSizes[2] * filterTensorSizes[3];
+
+    UINT outputTensorSizes[4] = { batchCount, features,
                                           ((inputWidth + padding[0]) - ((kernelWidth - 1) / 2)) / kernelStride[0],
                                           ((inputHeight + padding[1]) - ((kernelHeight - 1) / 2)) / kernelStride[1] };
-    constexpr UINT outputTensorElementCount = outputTensorSizes[0] * outputTensorSizes[1] * outputTensorSizes[2] * outputTensorSizes[3];
+    UINT outputTensorElementCount = outputTensorSizes[0] * outputTensorSizes[1] * outputTensorSizes[2] * outputTensorSizes[3];
 
-    constexpr UINT kernelSizes[dimensions] = { kernelWidth, kernelHeight };
+    UINT kernelSizes[dimensions] = { kernelWidth, kernelHeight };
 
-
+    for (int i = 0; i < 4; i++) {
+        assert(inputTensorSizes[i] == cp.m_constants.m_inputSize[i]);
+        assert(filterTensorSizes[i] == cp.m_constants.m_filterSize[i]);
+        assert(outputTensorSizes[i] == cp.m_constants.m_outputSize[i]);
+    }
 
 
     DML_BUFFER_TENSOR_DESC dmlInputBufferTensorDesc = {};
     dmlInputBufferTensorDesc.DataType = DML_TENSOR_DATA_TYPE_FLOAT32;
     dmlInputBufferTensorDesc.Flags = DML_TENSOR_FLAG_NONE;
-    dmlInputBufferTensorDesc.DimensionCount = ARRAYSIZE(inputTensorSizes);
-    dmlInputBufferTensorDesc.Sizes = inputTensorSizes;
+    dmlInputBufferTensorDesc.DimensionCount = ARRAYSIZE(cp.m_constants.m_inputSize);
+    dmlInputBufferTensorDesc.Sizes = cp.m_constants.m_inputSize;
     dmlInputBufferTensorDesc.Strides = nullptr;
     dmlInputBufferTensorDesc.TotalTensorSizeInBytes = DMLCalcBufferTensorSize(
         dmlInputBufferTensorDesc.DataType,
         dmlInputBufferTensorDesc.DimensionCount,
         dmlInputBufferTensorDesc.Sizes,
         dmlInputBufferTensorDesc.Strides);
+    assert((cp.m_constants.m_inputElementCount * sizeof(float)) == dmlInputBufferTensorDesc.TotalTensorSizeInBytes);
 
     DML_TENSOR_DESC dmlInputTensorDesc{};
     dmlInputTensorDesc.Type = DML_TENSOR_TYPE_BUFFER;
@@ -283,14 +290,15 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
     DML_BUFFER_TENSOR_DESC dmlFilterBufferTensorDesc = {};
     dmlFilterBufferTensorDesc.DataType = DML_TENSOR_DATA_TYPE_FLOAT32;
     dmlFilterBufferTensorDesc.Flags = DML_TENSOR_FLAG_NONE;
-    dmlFilterBufferTensorDesc.DimensionCount = ARRAYSIZE(filterTensorSizes);
-    dmlFilterBufferTensorDesc.Sizes = filterTensorSizes;
+    dmlFilterBufferTensorDesc.DimensionCount = ARRAYSIZE(cp.m_constants.m_filterSize);
+    dmlFilterBufferTensorDesc.Sizes = cp.m_constants.m_filterSize;
     dmlFilterBufferTensorDesc.Strides = nullptr;
     dmlFilterBufferTensorDesc.TotalTensorSizeInBytes = DMLCalcBufferTensorSize(
         dmlFilterBufferTensorDesc.DataType,
         dmlFilterBufferTensorDesc.DimensionCount,
         dmlFilterBufferTensorDesc.Sizes,
         dmlFilterBufferTensorDesc.Strides);
+    assert((cp.m_constants.m_filterElementCount * sizeof(float)) == dmlFilterBufferTensorDesc.TotalTensorSizeInBytes);
 
     DML_TENSOR_DESC dmlFilterTensorDesc{};
     dmlFilterTensorDesc.Type = DML_TENSOR_TYPE_BUFFER;
@@ -299,14 +307,15 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
     DML_BUFFER_TENSOR_DESC dmlOutputBufferTensorDesc = {};
     dmlOutputBufferTensorDesc.DataType = DML_TENSOR_DATA_TYPE_FLOAT32;
     dmlOutputBufferTensorDesc.Flags = DML_TENSOR_FLAG_NONE;
-    dmlOutputBufferTensorDesc.DimensionCount = ARRAYSIZE(outputTensorSizes);
-    dmlOutputBufferTensorDesc.Sizes = outputTensorSizes;
+    dmlOutputBufferTensorDesc.DimensionCount = ARRAYSIZE(cp.m_constants.m_outputSize);
+    dmlOutputBufferTensorDesc.Sizes = cp.m_constants.m_outputSize;
     dmlOutputBufferTensorDesc.Strides = nullptr;
     dmlOutputBufferTensorDesc.TotalTensorSizeInBytes = DMLCalcBufferTensorSize(
         dmlOutputBufferTensorDesc.DataType,
         dmlOutputBufferTensorDesc.DimensionCount,
         dmlOutputBufferTensorDesc.Sizes,
         dmlOutputBufferTensorDesc.Strides);
+    assert((cp.m_constants.m_outputElementCount * sizeof(float)) == dmlOutputBufferTensorDesc.TotalTensorSizeInBytes);
 
     DML_TENSOR_DESC dmlOutputTensorDesc{};
     dmlOutputTensorDesc.Type = DML_TENSOR_TYPE_BUFFER;
@@ -544,14 +553,18 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
 
     FLOAT * inputTensorElementArray = new FLOAT[inputTensorElementCount];
 
+    float testValue = 1.674f;
+
     for (int i = 0; i < inputTensorElementCount; i++) {
-        inputTensorElementArray[i] = 1.618f;
+        inputTensorElementArray[i] = testValue;
+        cp.m_buffers.m_input[i] = testValue;
     }
 
     FLOAT * filterTensorElementArray = new FLOAT[filterTensorElementCount];
 
     for (int i = 0; i < filterTensorElementCount; i++) {
-        filterTensorElementArray[i] = 1.618f;
+        filterTensorElementArray[i] = testValue;
+        cp.m_buffers.m_filter[i] = testValue;
     }
 
     {
@@ -698,28 +711,35 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
     FLOAT* outputBufferData{};
     check_hresult(readbackBuffer->Map(0, &tensorBufferRange, reinterpret_cast<void**>(&outputBufferData)));
 
-#if 0
-    std::wcout << L"output tensor: ";
-#endif
+    convolution_evaluate(cp);
+
+    static bool show_output = true;
+
+    if (show_output)
+        std::wcout << L"output tensor: ";
 
     bool valuesMatch = true;
     for (size_t tensorElementIndex{ 0 }; tensorElementIndex < outputTensorElementCount; ++tensorElementIndex, ++outputBufferData)
     {
+        if (show_output) {
+            std::wcout << *outputBufferData << L" (" << cp.m_buffers.m_output[tensorElementIndex] << L") ";
+        }
+
         float value = *outputBufferData;
-        if (abs(value - (1.618 * 1.618)) > 0.001) {
+
+        if (abs(value - cp.m_buffers.m_output[tensorElementIndex]) > 0.001) {
             valuesMatch = false;
-            break;
-//            std::wcout << *outputBufferData << L' ';
+            if (!show_output) break;
         }
     }
-#if 0
-    std::wcout << std::endl;
-#endif
+
+    if (show_output)
+        std::wcout << std::endl;
 
     D3D12_RANGE emptyRange{ 0, 0 };
     readbackBuffer->Unmap(0, &emptyRange);
 
-    if (!valuesMatch) printf("values don't match\n");
+    printf("%s\n", (valuesMatch ? "PASS" : "FAIL"));
 
 #if 0
     double dataSize = (double) outputTensorElementCount * (double) sizeof(FLOAT);

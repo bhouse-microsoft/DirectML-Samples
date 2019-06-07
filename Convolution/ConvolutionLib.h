@@ -9,74 +9,90 @@ template<typename T> struct convolution_buffers
     std::vector<T> m_output;
 };
 
-struct convolution_shape {
-    uint32_t batchCount;
-    uint32_t channelCount;
-    uint32_t inputSize[2];
-    uint32_t featureCount;
-    uint32_t kernelSize[2];
-    uint32_t padding[2];
-    uint32_t kernelStride[2];
+class convolution_shape {
+public:
+    uint32_t m_batchCount;
+    uint32_t m_channelCount;
+    uint32_t m_inputSize[2];
+    uint32_t m_featureCount;
+    uint32_t m_kernelSize[2];
+    uint32_t m_padding[2];
+    uint32_t m_kernelStride[2];
 };
 
-struct convolution_constants {
-    uint32_t inputSize[4];
-    uint32_t inputStride[4];
-    uint32_t inputTotalSize;
+class convolution_constants {
+public:
+    uint32_t m_inputSize[4];
+    uint32_t m_inputStride[4];
+    uint32_t m_inputElementCount;
 
-    uint32_t filterSize[4];
-    uint32_t filterStride[4];
-    uint32_t filterTotalSize;
+    uint32_t m_filterSize[4];
+    uint32_t m_filterStride[4];
+    uint32_t m_filterElementCount;
 
-    uint32_t outputSize[4];
-    uint32_t outputStride[4];
-    uint32_t outputTotalSize;
+    uint32_t m_outputSize[4];
+    uint32_t m_outputStride[4];
+    uint32_t m_outputElementCount;
 
-    uint32_t kernelStride[2];
-    uint32_t startPadding[2];
+    uint32_t m_kernelStride[2];
+    uint32_t m_startPadding[2];
 
-    convolution_constants(convolution_shape & shape)
+    convolution_constants(const convolution_shape & shape)
     {
-        inputSize[0] = shape.batchCount;
-        inputSize[1] = shape.channelCount;
+        m_inputSize[0] = shape.m_batchCount;
+        m_inputSize[1] = shape.m_channelCount;
         for(int i = 0; i < 2; i++)
-            inputSize[i+2] = shape.inputSize[i];
+            m_inputSize[i+2] = shape.m_inputSize[i];
 
-        inputStride[3] = 1;
+        m_inputStride[3] = 1;
         for(int i = 2; i >= 0; i--)
-            inputStride[i] = inputSize[i+1] * inputStride[i+1];
+            m_inputStride[i] = m_inputSize[i+1] * m_inputStride[i+1];
 
-        inputTotalSize = inputSize[0] * inputStride[0];
+        m_inputElementCount = m_inputSize[0] * m_inputStride[0];
 
-        filterSize[0] = shape.featureCount;
-        filterSize[1] = shape.channelCount;
+        m_filterSize[0] = shape.m_featureCount;
+        m_filterSize[1] = shape.m_channelCount;
         for (int i = 0; i < 2; i++)
-            filterSize[i + 2] = filterSize[i];
+            m_filterSize[i + 2] = shape.m_kernelSize[i];
 
-        filterStride[3] = 1;
+        m_filterStride[3] = 1;
         for (int i = 2; i >= 0; i--)
-            filterStride[i] = filterSize[i + 1] * filterStride[i + 1];
+            m_filterStride[i] = m_filterSize[i + 1] * m_filterStride[i + 1];
 
-        filterTotalSize = filterSize[0] * filterStride[0];
+        m_filterElementCount = m_filterSize[0] * m_filterStride[0];
 
-        outputSize[0] = shape.batchCount;
-        outputSize[1] = shape.featureCount;
+        m_outputSize[0] = shape.m_batchCount;
+        m_outputSize[1] = shape.m_featureCount;
         for(int i = 0; i < 2; i++)
-            outputSize[2+i] = ((shape.inputSize[i] + shape.padding[i]) - ((shape.kernelSize[i] - 1) / 2)) / shape.kernelStride[i];
+            m_outputSize[2+i] = ((shape.m_inputSize[i] + shape.m_padding[i]) - ((shape.m_kernelSize[i] - 1) / 2)) / shape.m_kernelStride[i];
 
-        outputStride[3] = 1;
+        m_outputStride[3] = 1;
         for (int i = 2; i >= 0; i--)
-            outputStride[i] = outputSize[i + 1] * outputStride[i + 1];
+            m_outputStride[i] = m_outputSize[i + 1] * m_outputStride[i + 1];
 
+        m_outputElementCount = m_outputSize[0] * m_outputStride[0];
+        
+        for (int i = 0; i < 2; i++) {
+            m_startPadding[i] = shape.m_padding[i];
+            m_kernelStride[i] = shape.m_kernelStride[i];
+        }
 
     }
 
 };
 
 template<typename T>
-struct convolution_parameters {
+class convolution_parameters {
+public:
     convolution_constants m_constants;
     convolution_buffers<T> m_buffers;
+
+    convolution_parameters(const convolution_shape & shape) : m_constants(shape)
+    {
+        m_buffers.m_input.resize(m_constants.m_inputElementCount);
+        m_buffers.m_filter.resize(m_constants.m_filterElementCount);
+        m_buffers.m_output.resize(m_constants.m_outputElementCount);
+    }
 };
 
 inline uint32_t dot4(uint32_t * a, uint32_t *b)
@@ -91,20 +107,21 @@ inline uint32_t dot4(uint32_t * a, uint32_t *b)
 template<typename T>
 uint32_t get_filter_offset(convolution_parameters<T> & cp, uint32_t * f)
 {
-    return dot4(cp.m_constants.filterStrides, f);
+    return dot4(cp.m_constants.m_filterStride, f);
 }
 
 template<typename T>
 T get_filter_value(convolution_parameters<T> & cp, uint32_t * f)
 {
-
-    return cp.m_buffers.m_filter[get_filter_offset(cp, f)];
+    uint32_t offset = get_filter_offset(cp, f);
+    T value = cp.m_buffers.m_filter[offset];
+    return value;
 }
 
 template<typename T>
 uint32_t get_output_offset(convolution_parameters<T> & cp, uint32_t *o)
 {
-    return dot4(cp.m_constants.outputStrides, o);
+    return dot4(cp.m_constants.m_outputStride, o);
 }
 
 template<typename T>
@@ -115,16 +132,16 @@ bool get_input_offset(convolution_parameters<T> & cp, uint32_t * f, uint32_t *o,
     i[1] = f[1];
 
     for (int j = 0; j < 2; j++) {
-        uint32_t offset = (o[j + 2] * cp.m_constants.kernelStrides[j]) + (f[j + 2]);
+        uint32_t offset = (o[j + 2] * cp.m_constants.m_kernelStride[j]) + (f[j + 2]);
 
-        if (offset < cp.m_constants.startPadding[j]) return false;
-        offset -= cp.m_constants.startPadding[j];
+        if (offset < cp.m_constants.m_startPadding[j]) return false;
+        offset -= cp.m_constants.m_startPadding[j];
 
-        if (offset >= cp.m_constants.inputSizes[j + 2]) return false;
+        if (offset >= cp.m_constants.m_inputSize[j + 2]) return false;
         i[j + 2] = offset;
     }
 
-    *offset = dot4(cp.m_constants.inputStrides, i);
+    *offset = dot4(cp.m_constants.m_inputStride, i);
     return true;
 }
 
@@ -133,7 +150,8 @@ T get_input_value(convolution_parameters<T> & cp, uint32_t * f, uint32_t *o)
 {
     uint32_t offset;
     if (!get_input_offset(cp, f, o, &offset)) return 0;
-    return cp.m_buffers.m_input[offset];
+    T value = cp.m_buffers.m_input[offset];
+    return value;
 }
 
 template<typename T>
@@ -143,9 +161,9 @@ float kernel(convolution_parameters<T> & cp, uint32_t * o)
 
     uint32_t f[4];
     f[0] = o[1];
-    for (f[1] = 0; f[1] < cp.m_constants.filterSizes[1]; f[1]++)
-        for (f[2] = 0; f[2] < cp.m_constants.filterSizes[2]; f[2]++)
-            for (f[3] = 0; f[3] < cp.m_constants.filterSizes[3]; f[3]++)
+    for (f[1] = 0; f[1] < cp.m_constants.m_filterSize[1]; f[1]++)
+        for (f[2] = 0; f[2] < cp.m_constants.m_filterSize[2]; f[2]++)
+            for (f[3] = 0; f[3] < cp.m_constants.m_filterSize[3]; f[3]++)
                 sum += get_filter_value(cp, f) * get_input_value(cp, f, o);
 
     return sum;
@@ -155,21 +173,21 @@ template<typename T>
 void convolution_evaluate(convolution_parameters<T> & cp)
 {
     convolution_constants & c = cp.m_constants;
-    assert(c.inputSize[0] == 1);
-    assert(c.inputStride[3] == 1);
-    assert(c.outputSize[0] == 1);
-    assert(c.outputStride[3] == 1);
-    assert(c.outputStride[2] == c.outputSize[3]);
-    assert(c.outputStride[1] == (c.outputSize[3] * c.outputSize[2]));
+    assert(c.m_inputSize[0] == 1);
+    assert(c.m_inputStride[3] == 1);
+    assert(c.m_outputSize[0] == 1);
+    assert(c.m_outputStride[3] == 1);
+    assert(c.m_outputStride[2] == c.m_outputSize[3]);
+    assert(c.m_outputStride[1] == (c.m_outputSize[3] * c.m_outputSize[2]));
 
     T * output = cp.m_buffers.m_output.data();
     uint32_t o[4];
     o[0] = 0;
-    for (o[1] = 0; o[1] < c.outputSizes[1]; o[1]++) // c
+    for (o[1] = 0; o[1] < c.m_outputSize[1]; o[1]++) // c
     {
-        for (o[2] = 0; o[2] < c.outputSizes[2]; o[2]++) // y
+        for (o[2] = 0; o[2] < c.m_outputSize[2]; o[2]++) // y
         {
-            for (o[3] = 0; o[3] < c.outputSizes[3]; o[3]++) // x
+            for (o[3] = 0; o[3] < c.m_outputSize[3]; o[3]++) // x
             {
                 *output++ = kernel(cp, o);
             }
