@@ -176,18 +176,23 @@ T get_input_value(convolution_parameters<T> & cp, uint32_t * f, uint32_t *o)
 }
 
 template<typename T>
-float kernel(convolution_parameters<T> & cp, uint32_t * o)
+T kernel(convolution_parameters<T> & cp, uint32_t * o)
 {
-    T sum = 0.0;
+    double sum = 0.0;
 
     uint32_t f[4];
     f[0] = o[1];
     for (f[1] = 0; f[1] < cp.m_constants.m_filterSize[1]; f[1]++)
         for (f[2] = 0; f[2] < cp.m_constants.m_filterSize[2]; f[2]++)
-            for (f[3] = 0; f[3] < cp.m_constants.m_filterSize[3]; f[3]++)
-                sum += get_filter_value(cp, f) * get_input_value(cp, f, o);
+            for (f[3] = 0; f[3] < cp.m_constants.m_filterSize[3]; f[3]++) {
+                double product = (double)get_filter_value(cp, f) * (double)get_input_value(cp, f, o);
+                float productFloat = (float) abs(product);
+                g_maxProduct = (productFloat > g_maxProduct ? productFloat : g_maxProduct);
+                g_minProduct = (productFloat < g_minProduct ? productFloat : g_minProduct);
+                sum += product;
+            }
 
-    return sum;
+    return (T) sum;
 }
 
 template<typename T>
