@@ -187,8 +187,6 @@ T kernel(convolution_parameters<T> & cp, uint32_t * o)
             for (f[3] = 0; f[3] < cp.m_constants.m_filterSize[3]; f[3]++) {
                 double product = (double)get_filter_value(cp, f) * (double)get_input_value(cp, f, o);
                 float productFloat = (float) abs(product);
-                g_maxProduct = (productFloat > g_maxProduct ? productFloat : g_maxProduct);
-                g_minProduct = (productFloat < g_minProduct ? productFloat : g_minProduct);
                 sum += product;
             }
 

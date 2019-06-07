@@ -238,16 +238,21 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
     convolution_shape shape;
 
     shape.m_batchCount = 1;
-    shape.m_channelCount = 1024;
     shape.m_featureCount = 1;
 
     for (int i = 0; i < dimensions; i++) {
         shape.m_inputSize[i] = 5;
-        shape.m_kernelSize[i] = 1;
+        shape.m_kernelSize[i] = 3;
         shape.m_startPadding[i] = 0;
         shape.m_endPadding[i] = 0;
         shape.m_kernelStride[i] = 1;
     }
+
+    const int targetProductSums = 1024;
+
+    shape.m_channelCount = (int) (targetProductSums / (shape.m_kernelSize[0] * shape.m_kernelSize[1]));
+
+    int productSums = shape.m_channelCount * (shape.m_kernelSize[0] * shape.m_kernelSize[1]);
 
     convolution_parameters<float> cp(shape);
 
@@ -539,30 +544,29 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
     std::wcout << std::fixed; std::wcout.precision(2);
 
     const static int floatPrecision = 23;
-    const static int length = shape.m_channelCount;
-    double averageProduct = 1.5;
-    double estimatedSum = averageProduct * length;
+    const static int halfPrecision = 10;
+    double targetProduct = 1.5;
+    double estimatedSum = targetProduct * productSums;
     const static int bitsUsedForAccumulation = (int) (log2(estimatedSum) + 0.99);
     double estimatedExponent = log2(estimatedSum);
-    double ulp = pow(2.0f, estimatedExponent - floatPrecision + 1);
-    double estimatedMaxError = ulp * sqrt(length) / 2;
+    double floatSumUlp = pow(2.0f, estimatedExponent - floatPrecision );
+    double halfSumUlp = pow(2.0f, estimatedExponent - halfPrecision );
+    double estimatedFloatMaxError = floatSumUlp * sqrt(productSums) / 2;
+    double estimatedHalfMaxError = halfSumUlp * sqrt(productSums) / 2;
+
+    printf("estimated float max error = %1.8lf\n", estimatedFloatMaxError);
+    printf("estimated half max error = %1.8lf\n", estimatedHalfMaxError);
 
     assert(shape.m_batchCount == 1 );
 
-    int inputOffset = 0;
-    int filterOffset = 0;
-    for (int c = 0; c < shape.m_channelCount; c++) {
-        double product = 1.0 + randd();
-        double a_value = 1.0 + randd();
-        double b_value = product / a_value;
-
-        for (int i = 0; i < shape.m_inputSize[0] * shape.m_inputSize[1]; i++)
-            cp.m_buffers.m_input[inputOffset++] = (float)a_value;
-        for (int k = 0; k < shape.m_kernelSize[0] * shape.m_kernelSize[1]; k++)
-            cp.m_buffers.m_filter[filterOffset++] = (float)b_value;
-    }
-    assert(inputOffset == cp.m_buffers.m_input.size());
-    assert(filterOffset == cp.m_buffers.m_filter.size());
+    // We want the product to be targetProduct +/- (ulp/2)
+    // NOTE: the delta will turn into (2*delta) in product thus ... floatSumUlp / 4
+    double delta = floatSumUlp / 4;
+    double squareRootTarget = sqrt(targetProduct);
+    for (int i = 0; i < cp.m_buffers.m_input.size(); i++)
+        cp.m_buffers.m_input[i] = (float)(squareRootTarget + (randd() * delta));
+    for (int i = 0; i < cp.m_buffers.m_filter.size(); i++)
+        cp.m_buffers.m_filter[i] = (float)(squareRootTarget  - (randd() * delta));
 
     {
 #if 0
@@ -716,10 +720,7 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
 
     static bool show_output = true;
 
-    if (show_output)
-        std::wcout << L"output tensor: ";
-
-    bool valuesMatch = true;
+     bool valuesMatch = true;
     float maxError = 0.0f;
     float maxPercentageError = 0.0f;
     for (int i = 0; i < cp.m_buffers.m_output.size(); i++)
