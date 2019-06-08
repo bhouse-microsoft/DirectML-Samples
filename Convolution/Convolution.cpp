@@ -69,7 +69,7 @@ void InitializeDirect3D12(
         DXGI_ADAPTER_DESC desc;
         dxgiAdapter.get()->GetDesc(&desc);
 
-#if 0
+#if 1
         if (wcsstr(desc.Description, L"Microsoft") == NULL) {
             hr = DXGI_ERROR_UNSUPPORTED;
             continue;
@@ -213,6 +213,7 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
     com_ptr<ID3D12CommandQueue> commandQueue;
     com_ptr<ID3D12CommandAllocator> commandAllocator;
     com_ptr<ID3D12GraphicsCommandList> commandList;
+    bool float16Convolution = true;
 
     // Set up Direct3D 12.
     InitializeDirect3D12(d3D12Device, commandQueue, commandAllocator, commandList);
@@ -248,7 +249,7 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
         shape.m_kernelStride[i] = 1;
     }
 
-    const int targetProductSums = 1024;
+    const int targetProductSums = 64;
 
     shape.m_channelCount = (int) (targetProductSums / (shape.m_kernelSize[0] * shape.m_kernelSize[1]));
 
@@ -278,36 +279,42 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
     UINT kernelSizes[dimensions] = { kernelWidth, kernelHeight };
 
     DML_BUFFER_TENSOR_DESC dmlInputBufferTensorDesc = {};
-    dmlInputBufferTensorDesc.DataType = DML_TENSOR_DATA_TYPE_FLOAT32;
+    dmlInputBufferTensorDesc.DataType = (float16Convolution ? DML_TENSOR_DATA_TYPE_FLOAT16 : DML_TENSOR_DATA_TYPE_FLOAT32);
     dmlInputBufferTensorDesc.Flags = DML_TENSOR_FLAG_NONE;
     dmlInputBufferTensorDesc.DimensionCount = ARRAYSIZE(cp.m_constants.m_inputSize);
     dmlInputBufferTensorDesc.Sizes = cp.m_constants.m_inputSize;
     dmlInputBufferTensorDesc.Strides = nullptr;
-    dmlInputBufferTensorDesc.TotalTensorSizeInBytes = (cp.m_constants.m_inputElementCount * sizeof(float));
+    dmlInputBufferTensorDesc.TotalTensorSizeInBytes = (cp.m_constants.m_inputElementCount * (float16Convolution ? 2 : 4));
+    // goofy DML rounds up to DWORD
+    dmlInputBufferTensorDesc.TotalTensorSizeInBytes = ((dmlInputBufferTensorDesc.TotalTensorSizeInBytes + 3)) & ~3UL;
 
     DML_TENSOR_DESC dmlInputTensorDesc{};
     dmlInputTensorDesc.Type = DML_TENSOR_TYPE_BUFFER;
     dmlInputTensorDesc.Desc = &dmlInputBufferTensorDesc;
 
     DML_BUFFER_TENSOR_DESC dmlFilterBufferTensorDesc = {};
-    dmlFilterBufferTensorDesc.DataType = DML_TENSOR_DATA_TYPE_FLOAT32;
+    dmlFilterBufferTensorDesc.DataType = (float16Convolution ? DML_TENSOR_DATA_TYPE_FLOAT16 : DML_TENSOR_DATA_TYPE_FLOAT32);;
     dmlFilterBufferTensorDesc.Flags = DML_TENSOR_FLAG_NONE;
     dmlFilterBufferTensorDesc.DimensionCount = ARRAYSIZE(cp.m_constants.m_filterSize);
     dmlFilterBufferTensorDesc.Sizes = cp.m_constants.m_filterSize;
     dmlFilterBufferTensorDesc.Strides = nullptr;
-    dmlFilterBufferTensorDesc.TotalTensorSizeInBytes = (cp.m_constants.m_filterElementCount * sizeof(float));
+    dmlFilterBufferTensorDesc.TotalTensorSizeInBytes = (cp.m_constants.m_filterElementCount * (float16Convolution ? 2 : 4));
+    // goofy DML rounds up to DWORD
+    dmlFilterBufferTensorDesc.TotalTensorSizeInBytes = ((dmlFilterBufferTensorDesc.TotalTensorSizeInBytes + 3)) & ~3UL;
 
     DML_TENSOR_DESC dmlFilterTensorDesc{};
     dmlFilterTensorDesc.Type = DML_TENSOR_TYPE_BUFFER;
     dmlFilterTensorDesc.Desc = &dmlFilterBufferTensorDesc;
 
     DML_BUFFER_TENSOR_DESC dmlOutputBufferTensorDesc = {};
-    dmlOutputBufferTensorDesc.DataType = DML_TENSOR_DATA_TYPE_FLOAT32;
+    dmlOutputBufferTensorDesc.DataType = (float16Convolution ? DML_TENSOR_DATA_TYPE_FLOAT16 : DML_TENSOR_DATA_TYPE_FLOAT32);;
     dmlOutputBufferTensorDesc.Flags = DML_TENSOR_FLAG_NONE;
     dmlOutputBufferTensorDesc.DimensionCount = ARRAYSIZE(cp.m_constants.m_outputSize);
     dmlOutputBufferTensorDesc.Sizes = cp.m_constants.m_outputSize;
     dmlOutputBufferTensorDesc.Strides = nullptr;
-    dmlOutputBufferTensorDesc.TotalTensorSizeInBytes = (cp.m_constants.m_outputElementCount * sizeof(float));
+    dmlOutputBufferTensorDesc.TotalTensorSizeInBytes = (cp.m_constants.m_outputElementCount * (float16Convolution ? 2 : 4));
+    // goofy DML rounds up to DWORD
+    dmlOutputBufferTensorDesc.TotalTensorSizeInBytes = ((dmlFilterBufferTensorDesc.TotalTensorSizeInBytes + 3)) & ~3UL;
 
     DML_TENSOR_DESC dmlOutputTensorDesc{};
     dmlOutputTensorDesc.Type = DML_TENSOR_TYPE_BUFFER;
@@ -340,7 +347,7 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
         dmlOperatorDesc.Type = DML_OPERATOR_CONVOLUTION;
         dmlOperatorDesc.Desc = &dmlConvolutionOperatorDesc;
 
-        check_hresult(dmlDevice->CreateOperator(
+         check_hresult(dmlDevice->CreateOperator(
             &dmlOperatorDesc,
             __uuidof(dmlOperator),
             dmlOperator.put_void()));
@@ -587,8 +594,27 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
         std::wcout << std::endl;
 #endif
 
+        std::vector< uint16_t> inputData16;
+        std::vector< uint16_t> filterData16;
+        
+        const void * inputData = cp.m_buffers.m_input.data();
+        const void * filterData = cp.m_buffers.m_filter.data();
+
+        if (float16Convolution) {
+            inputData16.resize(cp.m_buffers.m_input.size());
+            filterData16.resize(cp.m_buffers.m_filter.size());
+
+            for(int i = 0; i < cp.m_buffers.m_input.size(); i++)
+                inputData16[i] = Float16Compressor::compress(cp.m_buffers.m_input[i]);
+            inputData = inputData16.data();
+
+            for (int i = 0; i < cp.m_buffers.m_filter.size(); i++)
+                filterData16[i] = Float16Compressor::compress(cp.m_buffers.m_filter[i]);
+            filterData = filterData16.data();
+        }
+
         D3D12_SUBRESOURCE_DATA tensorSubresourceData{};
-        tensorSubresourceData.pData = (const void *) cp.m_buffers.m_input.data();
+        tensorSubresourceData.pData = inputData;
         tensorSubresourceData.RowPitch = inputTensorBufferSize;
         tensorSubresourceData.SlicePitch = tensorSubresourceData.RowPitch;
 
@@ -612,7 +638,7 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
             );
 
         // Upload the filter tensor to the GPU
-        tensorSubresourceData.pData = (const void *)cp.m_buffers.m_filter.data();
+        tensorSubresourceData.pData = filterData;
         tensorSubresourceData.RowPitch = filterTensorBufferSize;
         tensorSubresourceData.SlicePitch = tensorSubresourceData.RowPitch;
 
@@ -715,8 +741,9 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
     CloseExecuteResetWait(d3D12Device, commandQueue, commandAllocator, commandList);
 
     D3D12_RANGE tensorBufferRange{ 0, outputTensorBufferSize };
-    FLOAT* outputBufferData{};
-    check_hresult(readbackBuffer->Map(0, &tensorBufferRange, reinterpret_cast<void**>(&outputBufferData)));
+
+    void* outputData;
+    check_hresult(readbackBuffer->Map(0, &tensorBufferRange, &outputData));
 
     convolution_evaluate(cp);
 
@@ -725,9 +752,13 @@ int __cdecl wmain(int /*argc*/, char ** /*argv*/)
      bool valuesMatch = true;
     float maxError = 0.0f;
     float maxPercentageError = 0.0f;
+
+    float * output32 = (float *)outputData;
+    uint16_t * output16 = (uint16_t *)outputData;
+
     for (int i = 0; i < cp.m_buffers.m_output.size(); i++)
     {
-        float calculated = outputBufferData[i];
+        float calculated = (float16Convolution ? Float16Compressor::decompress(output16[i]) : output32[i]);
         float expected = cp.m_buffers.m_output[i];
 
         if (show_output)
